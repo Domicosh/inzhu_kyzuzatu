@@ -1,48 +1,86 @@
+/**
+ * Vercel API handler for TanStack Start
+ * Converts Node.js req/res to Fetch API and vice versa
+ */
 export default async (req, res) => {
   try {
-    // Load the built server module
-    const module = await import('../dist/server/server.js');
-    const serverHandler = module.default;
+    // Import the prebuilt TanStack Start server handler
+    // Note: Using dynamic import to ensure ES modules work correctly
+    const serverModule = await import('../dist/server/server.js');
+    const server = serverModule.default;
 
-    // Build the full URL with protocol
+    if (!server || !server.fetch) {
+      throw new Error(
+        `Invalid server handler. Expected fetch method, got: ${Object.keys(serverModule).join(', ')}`
+      );
+    }
+
+    // Build request URL
     const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers['host'] || 'localhost';
-    const fullUrl = `${protocol}://${host}${req.url}`;
-    
-    // Create a Web Fetch API request
+    const host = req.headers.host || 'localhost';
+    const url = new URL(req.url || '/', `${protocol}://${host}`);
+
+    // Prepare headers for Fetch API
     const headers = new Headers();
-    for (const [key, value] of Object.entries(req.headers || {})) {
+    Object.entries(req.headers).forEach(([key, value]) => {
       if (typeof value === 'string') {
         headers.set(key, value);
+      } else if (Array.isArray(value)) {
+        value.forEach(v => headers.append(key, v));
       }
-    }
+    });
 
+    // Prepare body if present
     let body = null;
-    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
       if (req.body) {
         body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+      } else if (req.rawBody) {
+        body = req.rawBody;
       }
     }
 
-    const fetchReq = new Request(fullUrl, {
+    // Create Fetch API Request
+    const fetchRequest = new Request(url.toString(), {
       method: req.method || 'GET',
       headers,
       body,
     });
 
-    // Call the server handler
-    const response = await serverHandler.fetch(fetchReq, {}, {});
+    // Call TanStack Start handler with Fetch API
+    const fetchResponse = await server.fetch(fetchRequest, {}, {});
 
-    // Send response back
-    res.status(response.status);
-    response.headers.forEach((value, key) => {
-      res.setHeader(key, value);
+    // Set response status
+    res.statusCode = fetchResponse.status;
+    res.statusMessage = fetchResponse.statusText;
+
+    // Copy response headers
+    fetchResponse.headers.forEach((value, key) => {
+      // Avoid setting content-encoding multiple times
+      if (key !== 'content-encoding') {
+        res.setHeader(key, value);
+      }
     });
 
-    const buffer = await response.arrayBuffer();
+    // Stream response body
+    const buffer = await fetchResponse.arrayBuffer();
     res.end(Buffer.from(buffer));
-  } catch (err) {
-    console.error('Server error:', err);
-    res.status(500).send('Internal Server Error');
+  } catch (error) {
+    console.error('[[[...routes]]] Error:', error);
+    
+    // Only respond if headers haven't been sent
+    if (!res.headersSent) {
+      res.statusCode = 500;
+      res.setHeader('content-type', 'application/json');
+      res.end(
+        JSON.stringify({
+          error: 'Internal Server Error',
+          ...(process.env.NODE_ENV === 'development' && {
+            details: error.message,
+            stack: error.stack,
+          }),
+        })
+      );
+    }
   }
 };
