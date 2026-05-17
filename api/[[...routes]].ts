@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'http';
 export default async (req: IncomingMessage, res: ServerResponse) => {
   try {
     // Dynamic import of the server handler
-    const { default: handler } = await import('../dist/server/assets/start.js');
+    const { default: handler } = await import('../dist/server/start-BcdhoeTC') as any;
     
     // Convert Node request to Web standard Request
     const protocol = (req.headers['x-forwarded-proto'] as string) || 'http';
@@ -11,7 +11,7 @@ export default async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL((req.url || '/'), `${protocol}://${host}`);
     
     const headers = new Headers();
-    Object.entries(req.headers).forEach(([key, value]) => {
+    Object.entries(req.headers).forEach(([key, value]: [string, any]) => {
       if (value !== undefined) {
         headers.append(key, Array.isArray(value) ? value.join(', ') : String(value));
       }
@@ -40,7 +40,7 @@ export default async (req: IncomingMessage, res: ServerResponse) => {
     res.statusMessage = response.statusText;
     
     // Set headers
-    response.headers.forEach((value, key) => {
+    response.headers.forEach((value: string, key: string) => {
       res.setHeader(key, value);
     });
     
